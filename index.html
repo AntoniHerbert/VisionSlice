@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IA Segmentation Stream (Sincronizado)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .recording-indicator { animation: pulse-red 2s infinite; }
+        #video-container { position: relative; background: #000; overflow: hidden; min-height: 300px; display: flex; align-items: center; justify-content: center; }
+        #webcam-video { display: block; width: 100%; height: auto; max-height: 100%; }
+        #crop-overlay { position: absolute; border: 2px solid #22c55e; background-color: rgba(34, 197, 94, 0.1); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7); cursor: move; touch-action: none; z-index: 10; }
+        .resize-handle { position: absolute; bottom: 0; right: 0; width: 20px; height: 20px; background: #22c55e; cursor: nwse-resize; border-top-left-radius: 4px; z-index: 11; }
+        #preview-canvas { width: 100%; height: 100%; object-fit: contain; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-gray-800 p-4 shadow-lg border-b border-gray-700">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <i class="fas fa-brain text-purple-500"></i>
+                IA Stream (Sync)
+            </h1>
+            <div class="text-sm text-gray-400">
+                Latência: <span id="latency-display" class="font-mono text-yellow-500">0ms</span> | 
+                Status: <span id="ws-status" class="font-bold text-red-500">Off</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow p-4 md:p-6 flex flex-col items-center gap-6 select-none w-full max-w-6xl mx-auto">
+        <div class="w-full flex flex-col lg:flex-row gap-6">
+            
+            <div class="w-full lg:w-2/3 flex flex-col gap-4">
+                <div id="video-wrapper" class="w-full shadow-2xl rounded-xl overflow-hidden border border-gray-700 relative bg-black group">
+                    <div id="video-container">
+                        <video id="webcam-video" autoplay muted crossorigin="anonymous"></video>
+                        <div id="crop-overlay" class="hidden">
+                            <div class="absolute -top-6 left-0 bg-green-600 text-white text-[10px] px-2 py-0.5 rounded font-mono whitespace-nowrap"><span id="crop-dimensions">-- x --</span></div>
+                            <div class="absolute inset-0 grid grid-cols-3 pointer-events-none opacity-30"><div class="border-r border-green-400 h-full"></div><div class="border-r border-green-400 h-full"></div></div>
+                            <div class="absolute inset-0 grid grid-rows-3 pointer-events-none opacity-30"><div class="border-b border-green-400 w-full"></div><div class="border-b border-green-400 w-full"></div></div>
+                            <div class="resize-handle" id="resize-handle"></div>
+                        </div>
+                        <div id="placeholder" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/90 z-20 text-center p-6">
+                            <h3 class="text-xl text-gray-400 font-semibold">Sem Sinal</h3>
+                        </div>
+                    </div>
+                    <div id="rec-indicator" class="hidden absolute top-4 right-4 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full items-center gap-2 z-30 recording-indicator">
+                        <div class="w-2 h-2 bg-white rounded-full"></div> PROCESSANDO
+                    </div>
+                </div>
+
+                <div id="custom-controls" class="hidden bg-gray-800 p-3 rounded-lg border border-gray-700 flex items-center gap-4">
+                    <button id="btn-play-pause" class="text-white hover:text-blue-400 w-8"><i class="fas fa-pause"></i></button>
+                    <input type="range" id="seek-bar" min="0" value="0" step="0.1" class="flex-grow h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+                </div>
+
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 flex flex-wrap gap-4 items-center justify-between">
+                    <div class="flex gap-2">
+                        <button id="btn-webcam" class="bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded text-sm"><i class="fas fa-camera"></i> Webcam</button>
+                        <button onclick="document.getElementById('file-input').click()" class="bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded text-sm"><i class="fas fa-upload"></i> Arquivo</button>
+                        <input type="file" id="file-input" accept="video/*" class="hidden">
+                    </div>
+                    <button id="btn-stream" disabled class="bg-gray-900 text-gray-500 cursor-not-allowed font-bold py-2 px-8 rounded border border-gray-700 uppercase hover:bg-purple-700 hover:text-white transition-colors">
+                        <i class="fas fa-bolt"></i> Iniciar IA
+                    </button>
+                </div>
+            </div>
+
+            <div class="w-full lg:w-1/3 flex flex-col gap-4">
+                <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 shadow-inner">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700 pb-2 mb-3">Máscara IA</h3>
+                    <div class="w-full aspect-square bg-black rounded border border-gray-600 flex items-center justify-center overflow-hidden">
+                        <img id="preview-image" class="w-full h-full object-contain hidden" />
+                        <div id="preview-placeholder" class="text-gray-500 text-xs">Aguardando...</div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 shadow-inner flex-1 min-h-[200px] flex flex-col">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-700 pb-2 mb-2">Pixels</h3>
+                    <div class="relative flex-1 w-full h-full"><canvas id="sizeChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <canvas id="process-canvas" class="hidden"></canvas>
+
+    <script>
+        // --- WebSocket & Flow Control ---
+        let ws = null;
+        let isProcessingFrame = false;
+        let lastFrameTime = 0;
+        
+        const WS_URL = "ws://" + window.location.host + "/ws";
+        const wsStatus = document.getElementById('ws-status');
+        const latencyDisplay = document.getElementById('latency-display');
+
+        function connectWebSocket() {
+            ws = new WebSocket(WS_URL);
+            ws.onopen = () => { wsStatus.innerText = "On"; wsStatus.className = "font-bold text-green-500"; };
+            ws.onclose = () => { wsStatus.innerText = "Off"; wsStatus.className = "font-bold text-red-500"; setTimeout(connectWebSocket, 2000); };
+            
+            ws.onmessage = (event) => {
+                const now = performance.now();
+                const latency = Math.round(now - lastFrameTime);
+                latencyDisplay.innerText = latency + "ms";
+
+                const data = JSON.parse(event.data);
+                
+                // Atualiza UI
+                const img = document.getElementById('preview-image');
+                img.src = data.image;
+                img.classList.remove('hidden');
+                document.getElementById('preview-placeholder').classList.add('hidden');
+                
+                updateChartData(data.pixels);
+
+                // --- CONTROLE DE FLUXO ---
+                isProcessingFrame = false; 
+                
+                if (isStreaming) {
+                    requestAnimationFrame(captureAndSend);
+                }
+            };
+        }
+        connectWebSocket();
+
+        // --- Core Application Logic ---
+        const video = document.getElementById('webcam-video');
+        const container = document.getElementById('video-container');
+        const overlay = document.getElementById('crop-overlay');
+        const resizeHandle = document.getElementById('resize-handle');
+        const placeholder = document.getElementById('placeholder');
+        const fileInput = document.getElementById('file-input');
+        const customControls = document.getElementById('custom-controls');
+        const btnPlayPause = document.getElementById('btn-play-pause');
+        const seekBar = document.getElementById('seek-bar');
+        const btnWebcam = document.getElementById('btn-webcam');
+        const btnStream = document.getElementById('btn-stream');
+        const processCanvas = document.getElementById('process-canvas');
+        const processCtx = processCanvas.getContext('2d');
+
+        let isStreaming = false;
+        let activeSourceType = null;
+        const CHART_WINDOW_SECONDS = 10;
+        let videoDataBuffer = {}; 
+        let crop = { x: 0, y: 0, w: 200, h: 200 };
+        let isDragging=false, isResizing=false, startX, startY, startCropX, startCropY, startCropW, startCropH;
+
+        // --- Gráfico ---
+        const ctxChart = document.getElementById('sizeChart').getContext('2d');
+        const sizeChart = new Chart(ctxChart, {
+            type: 'line', 
+            data: { datasets: [{ label: 'Pixels', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.4)', fill: true, tension: 0.3, pointRadius: 0 }] },
+            options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { x: { type: 'linear', display: true, min: 0, max: 60, ticks: { color: '#9ca3af' } }, y: { beginAtZero: true, grid: { color: '#374151' } } }, plugins: { legend: { display: false } } }
+        });
+
+        function resetChartForWebcam() {
+            sizeChart.data.datasets[0].type = 'line';
+            sizeChart.options.scales.x.display = false;
+            sizeChart.data.datasets[0].data = [];
+            sizeChart.update();
+            videoDataBuffer = {};
+        }
+
+        function resetChartForFile(duration) {
+            sizeChart.data.datasets[0].type = 'bar';
+            sizeChart.options.scales.x.display = true;
+            sizeChart.options.scales.x.min = 0;
+            sizeChart.options.scales.x.max = CHART_WINDOW_SECONDS;
+            sizeChart.data.datasets[0].data = [];
+            sizeChart.update();
+            videoDataBuffer = {};
+        }
+
+        function updateChartData(val) {
+            if (activeSourceType === 'webcam') {
+                sizeChart.data.labels.push(""); 
+                sizeChart.data.datasets[0].data.push(val);
+                if (sizeChart.data.datasets[0].data.length > 50) sizeChart.data.datasets[0].data.shift();
+                sizeChart.update();
+            } else if (activeSourceType === 'file') {
+                const t = video.currentTime;
+                const idx = Math.floor(t * 10); 
+                videoDataBuffer[idx] = { x: t, y: val };
+                sizeChart.data.datasets[0].data = Object.values(videoDataBuffer).sort((a,b)=>a.x-b.x);
+                sizeChart.options.scales.x.min = t - (CHART_WINDOW_SECONDS/2);
+                sizeChart.options.scales.x.max = t + (CHART_WINDOW_SECONDS/2);
+                sizeChart.update('none');
+            }
+        }
+
+        // --- Capture & Send Loop ---
+        function toggleStreaming() {
+            if (isStreaming) {
+                isStreaming = false;
+                isProcessingFrame = false;
+                document.getElementById('rec-indicator').classList.add('hidden');
+                btnStream.innerHTML = '<i class="fas fa-bolt"></i> Iniciar IA';
+                btnStream.classList.remove('bg-red-600'); btnStream.classList.add('bg-purple-600');
+            } else {
+                if (!ws || ws.readyState !== WebSocket.OPEN) return alert("Sem conexão com Backend");
+                isStreaming = true;
+                isProcessingFrame = false;
+                document.getElementById('rec-indicator').classList.remove('hidden');
+                btnStream.innerHTML = '<i class="fas fa-stop"></i> Parar';
+                btnStream.classList.remove('bg-purple-600'); btnStream.classList.add('bg-red-600');
+                
+                // Inicia o ciclo
+                captureAndSend();
+            }
+        }
+
+        function captureAndSend() {
+            if (!isStreaming) return;
+            if (isProcessingFrame) return; 
+            
+            if (!video.videoWidth) return;
+            if (activeSourceType === 'file' && video.paused) return;
+
+            isProcessingFrame = true;
+            lastFrameTime = performance.now();
+
+            const dims = renderToCanvas(processCanvas, processCtx);
+            if (dims) {
+                processCanvas.toBlob(blob => {
+                    if (blob && ws.readyState === WebSocket.OPEN) ws.send(blob);
+                    else isProcessingFrame = false; 
+                }, 'image/jpeg', 0.6);
+            } else {
+                isProcessingFrame = false;
+            }
+        }
+
+        function renderToCanvas(cvs, ctx) {
+            if(!video.videoWidth) return null;
+            const dw = video.offsetWidth, dh = video.offsetHeight;
+            const sx = video.videoWidth/dw, sy = video.videoHeight/dh;
+            const rw = crop.w*sx, rh = crop.h*sy;
+            if(cvs.width!==Math.floor(rw) || cvs.height!==Math.floor(rh)) { cvs.width=rw; cvs.height=rh; }
+            ctx.drawImage(video, crop.x*sx, crop.y*sy, rw, rh, 0, 0, rw, rh);
+            return {w:rw, h:rh};
+        }
+
+        // --- Helpers ---
+        async function enableWebcam() {
+            stopSource();
+            resetChartForWebcam();
+            activeSourceType='webcam';
+            const s = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720}}});
+            video.srcObject=s; video.removeAttribute('src'); video.muted=true; try{await video.play();}catch(e){}
+            updateUI(true);
+        }
+        
+        fileInput.onchange = (e) => {
+            if(!e.target.files[0]) return;
+            stopSource();
+            activeSourceType='file';
+            video.srcObject=null; video.src=URL.createObjectURL(e.target.files[0]); video.muted=false; video.loop=true; video.play().catch(()=>{});
+            updateUI(false);
+        };
+
+        function stopSource() {
+            if(video.srcObject) video.srcObject.getTracks().forEach(t=>t.stop());
+            video.pause(); video.src=""; video.srcObject=null;
+            placeholder.classList.remove('hidden'); overlay.classList.add('hidden');
+            if(isStreaming) toggleStreaming();
+        }
+
+        function updateUI(isWebcam) {
+            placeholder.classList.add('hidden'); overlay.classList.remove('hidden');
+            btnStream.disabled=false; btnStream.classList.remove('cursor-not-allowed','bg-gray-900','text-gray-500'); btnStream.classList.add('bg-purple-600','text-white');
+            isWebcam ? customControls.classList.add('hidden') : customControls.classList.remove('hidden');
+            setTimeout(initCrop,100);
+        }
+
+        // Crop & Events
+        function initCrop() { const s=Math.min(container.clientWidth,container.clientHeight)*0.4; crop={x:(container.clientWidth-s)/2, y:(container.clientHeight-s)/2, w:s, h:s}; updateCrop(); }
+        function updateCrop() { overlay.style.left=crop.x+'px'; overlay.style.top=crop.y+'px'; overlay.style.width=crop.w+'px'; overlay.style.height=crop.h+'px'; const sc=video.videoWidth/video.offsetWidth; document.getElementById('crop-dimensions').innerText=`${Math.round(crop.w*sc)}x${Math.round(crop.h*sc)}`; }
+        
+        overlay.onmousedown = e => { if(e.target===resizeHandle)return; isDragging=true; startX=e.clientX; startY=e.clientY; startCropX=crop.x; startCropY=crop.y; };
+        resizeHandle.onmousedown = e => { isResizing=true; startX=e.clientX; startY=e.clientY; startCropW=crop.w; startCropH=crop.h; e.stopPropagation(); };
+        window.onmousemove = e => {
+            if(isDragging) { crop.x=Math.max(0,Math.min(startCropX+e.clientX-startX,container.clientWidth-crop.w)); crop.y=Math.max(0,Math.min(startCropY+e.clientY-startY,container.clientHeight-crop.h)); updateCrop(); }
+            else if(isResizing) { crop.w=Math.max(50,Math.min(startCropW+e.clientX-startX,container.clientWidth-crop.x)); crop.h=Math.max(50,Math.min(startCropH+e.clientY-startY,container.clientHeight-crop.y)); updateCrop(); }
+        };
+        window.onmouseup = () => { isDragging=false; isResizing=false; };
+        
+        video.onloadedmetadata = () => { if(activeSourceType==='file') resetChartForFile(video.duration); container.style.height=(container.clientWidth*(video.videoHeight/video.videoWidth))+'px'; initCrop(); };
+        video.ontimeupdate = () => { seekBar.value=video.currentTime; if(activeSourceType==='file') updateChartData(0); /*Hack to update chart window*/ };
+        btnPlayPause.onclick = () => video.paused ? (video.play(), btnPlayPause.innerHTML='<i class="fas fa-pause"></i>') : (video.pause(), btnPlayPause.innerHTML='<i class="fas fa-play"></i>');
+        seekBar.oninput = () => video.currentTime = seekBar.value;
+        btnWebcam.onclick = enableWebcam; btnStream.onclick = toggleStreaming; window.onresize=()=>activeSourceType&&setTimeout(initCrop,100);
+
+    </script>
+</body>
+</html>

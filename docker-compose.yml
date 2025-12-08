@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  webcam-ai:
+    build: .
+    container_name: webcam_segmentation_dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Opcional: Se tiver GPU Nvidia e Docker Toolkit configurado, descomentar abaixo:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
