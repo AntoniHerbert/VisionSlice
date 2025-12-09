@@ -32,6 +32,16 @@
         </div>
     </header>
 
+    <!-- Banner de Erro de Conexão (HTTPS vs HTTP) -->
+    <div id="https-error-banner" class="hidden bg-red-600 text-white p-4 text-center font-bold shadow-lg">
+        <i class="fas fa-exclamation-triangle mr-2"></i>
+        Erro de Segurança do Navegador: Não é possível conectar ao servidor local (WS) a partir de uma página segura (HTTPS).
+        <br>
+        <span class="text-sm font-normal bg-black/20 px-2 py-1 rounded mt-2 inline-block">
+            SOLUÇÃO: Abra <u>http://localhost:8000</u> em uma nova aba para testar.
+        </span>
+    </div>
+
     <main class="flex-grow p-4 md:p-6 flex flex-col items-center gap-6 select-none w-full max-w-6xl mx-auto">
         <div class="w-full flex flex-col lg:flex-row gap-6">
             
@@ -93,17 +103,46 @@
     <script>
         // --- WebSocket & Flow Control ---
         let ws = null;
-        let isProcessingFrame = false;
+        let isProcessingFrame = false; 
         let lastFrameTime = 0;
         
-        const WS_URL = "ws://" + window.location.host + "/ws";
+        let wsHost = window.location.host;
+        if (!wsHost || window.location.hostname.includes('googleusercontent') || window.location.protocol === 'file:') {
+             wsHost = "localhost:8000";
+        }
+        
+        const WS_URL = "ws://" + wsHost + "/ws";
+        
         const wsStatus = document.getElementById('ws-status');
         const latencyDisplay = document.getElementById('latency-display');
+        const errorBanner = document.getElementById('https-error-banner');
 
         function connectWebSocket() {
-            ws = new WebSocket(WS_URL);
-            ws.onopen = () => { wsStatus.innerText = "On"; wsStatus.className = "font-bold text-green-500"; };
-            ws.onclose = () => { wsStatus.innerText = "Off"; wsStatus.className = "font-bold text-red-500"; setTimeout(connectWebSocket, 2000); };
+            try {
+                ws = new WebSocket(WS_URL);
+            } catch (err) {
+                showConnectionError();
+                return;
+            }
+
+            ws.onopen = () => { 
+                wsStatus.innerText = "On"; 
+                wsStatus.className = "font-bold text-green-500"; 
+                errorBanner.classList.add('hidden');
+            };
+            
+            ws.onclose = () => { 
+                wsStatus.innerText = "Off"; 
+                wsStatus.className = "font-bold text-red-500"; 
+                setTimeout(connectWebSocket, 2000); 
+            };
+            
+            ws.onerror = (err) => {
+                if (window.location.protocol === 'https:') {
+                    showConnectionError();
+                }
+                console.error("WS Error:", err);
+            };
             
             ws.onmessage = (event) => {
                 const now = performance.now();
@@ -112,7 +151,6 @@
 
                 const data = JSON.parse(event.data);
                 
-                // Atualiza UI
                 const img = document.getElementById('preview-image');
                 img.src = data.image;
                 img.classList.remove('hidden');
@@ -120,17 +158,19 @@
                 
                 updateChartData(data.pixels);
 
-                // --- CONTROLE DE FLUXO ---
                 isProcessingFrame = false; 
-                
-                if (isStreaming) {
-                    requestAnimationFrame(captureAndSend);
-                }
+                if (isStreaming) requestAnimationFrame(captureAndSend);
             };
         }
+
+        function showConnectionError() {
+            wsStatus.innerText = "Erro HTTPS";
+            errorBanner.classList.remove('hidden');
+        }
+
         connectWebSocket();
 
-        // --- Core Application Logic ---
+        // --- Core Logic ---
         const video = document.getElementById('webcam-video');
         const container = document.getElementById('video-container');
         const overlay = document.getElementById('crop-overlay');
@@ -157,45 +197,70 @@
         const sizeChart = new Chart(ctxChart, {
             type: 'line', 
             data: { datasets: [{ label: 'Pixels', data: [], borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.4)', fill: true, tension: 0.3, pointRadius: 0 }] },
-            options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { x: { type: 'linear', display: true, min: 0, max: 60, ticks: { color: '#9ca3af' } }, y: { beginAtZero: true, grid: { color: '#374151' } } }, plugins: { legend: { display: false } } }
+            options: { 
+                responsive: true, maintainAspectRatio: false, animation: false, 
+                scales: { 
+                    x: { type: 'category', display: false }, 
+                    y: { beginAtZero: true, grid: { color: '#374151' } } 
+                }, 
+                plugins: { legend: { display: false } } 
+            }
         });
 
+        // --- Correção da Visualização do Gráfico ---
         function resetChartForWebcam() {
+            sizeChart.options.scales.x = { type: 'category', display: false, grid: { color: '#374151' } };
             sizeChart.data.datasets[0].type = 'line';
-            sizeChart.options.scales.x.display = false;
+            sizeChart.data.datasets[0].fill = true;
+            sizeChart.data.datasets[0].tension = 0.3;
+            sizeChart.data.datasets[0].pointRadius = 0;
             sizeChart.data.datasets[0].data = [];
+            sizeChart.data.labels = [];
             sizeChart.update();
             videoDataBuffer = {};
         }
 
         function resetChartForFile(duration) {
+            sizeChart.options.scales.x = { type: 'linear', display: true, min: 0, max: CHART_WINDOW_SECONDS, grid: { color: '#374151' }, ticks: { color: '#9ca3af', callback: v => v.toFixed(1)+'s' } };
             sizeChart.data.datasets[0].type = 'bar';
-            sizeChart.options.scales.x.display = true;
-            sizeChart.options.scales.x.min = 0;
-            sizeChart.options.scales.x.max = CHART_WINDOW_SECONDS;
+            sizeChart.data.datasets[0].barThickness = 3;
+            sizeChart.data.datasets[0].backgroundColor = '#8b5cf6';
+            sizeChart.data.datasets[0].fill = false;
             sizeChart.data.datasets[0].data = [];
+            sizeChart.data.labels = []; 
             sizeChart.update();
             videoDataBuffer = {};
+        }
+
+        function updateChartWindow() {
+            if (activeSourceType === 'file') {
+                const now = video.currentTime;
+                const halfWindow = CHART_WINDOW_SECONDS / 2;
+                sizeChart.options.scales.x.min = now - halfWindow;
+                sizeChart.options.scales.x.max = now + halfWindow;
+                sizeChart.update('none');
+            }
         }
 
         function updateChartData(val) {
             if (activeSourceType === 'webcam') {
                 sizeChart.data.labels.push(""); 
                 sizeChart.data.datasets[0].data.push(val);
-                if (sizeChart.data.datasets[0].data.length > 50) sizeChart.data.datasets[0].data.shift();
+                if (sizeChart.data.datasets[0].data.length > 50) {
+                    sizeChart.data.datasets[0].data.shift();
+                    sizeChart.data.labels.shift();
+                }
                 sizeChart.update();
             } else if (activeSourceType === 'file') {
                 const t = video.currentTime;
                 const idx = Math.floor(t * 10); 
                 videoDataBuffer[idx] = { x: t, y: val };
                 sizeChart.data.datasets[0].data = Object.values(videoDataBuffer).sort((a,b)=>a.x-b.x);
-                sizeChart.options.scales.x.min = t - (CHART_WINDOW_SECONDS/2);
-                sizeChart.options.scales.x.max = t + (CHART_WINDOW_SECONDS/2);
-                sizeChart.update('none');
+                updateChartWindow();
             }
         }
 
-        // --- Capture & Send Loop ---
+        // --- Capture & Send ---
         function toggleStreaming() {
             if (isStreaming) {
                 isStreaming = false;
@@ -204,14 +269,12 @@
                 btnStream.innerHTML = '<i class="fas fa-bolt"></i> Iniciar IA';
                 btnStream.classList.remove('bg-red-600'); btnStream.classList.add('bg-purple-600');
             } else {
-                if (!ws || ws.readyState !== WebSocket.OPEN) return alert("Sem conexão com Backend");
+                if (!ws || ws.readyState !== WebSocket.OPEN) return alert("Sem conexão com Backend (verifique banner de erro)");
                 isStreaming = true;
                 isProcessingFrame = false;
                 document.getElementById('rec-indicator').classList.remove('hidden');
                 btnStream.innerHTML = '<i class="fas fa-stop"></i> Parar';
                 btnStream.classList.remove('bg-purple-600'); btnStream.classList.add('bg-red-600');
-                
-                // Inicia o ciclo
                 captureAndSend();
             }
         }
@@ -219,11 +282,10 @@
         function captureAndSend() {
             if (!isStreaming) return;
             if (isProcessingFrame) return; 
-            
             if (!video.videoWidth) return;
             if (activeSourceType === 'file' && video.paused) return;
 
-            isProcessingFrame = true;
+            isProcessingFrame = true; 
             lastFrameTime = performance.now();
 
             const dims = renderToCanvas(processCanvas, processCtx);
@@ -231,7 +293,7 @@
                 processCanvas.toBlob(blob => {
                     if (blob && ws.readyState === WebSocket.OPEN) ws.send(blob);
                     else isProcessingFrame = false; 
-                }, 'image/jpeg', 0.6);
+                }, 'image/jpeg', 0.6); 
             } else {
                 isProcessingFrame = false;
             }
