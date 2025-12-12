@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Streamer IA: LIFO & Backfill</title>
+    <title>Vision Slice</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -25,7 +25,7 @@
         <div class="max-w-6xl mx-auto flex justify-between items-center">
             <h1 class="text-xl font-bold flex items-center gap-2">
                 <i class="fas fa-layer-group text-purple-500"></i>
-                Streamer Inteligente (LIFO + Backfill)
+                Vision Slice
             </h1>
             <div class="text-sm text-gray-400">
                 Latência: <span id="latency-display" class="font-mono text-yellow-500">0ms</span>
@@ -79,16 +79,15 @@
                         <div id="processed-count" class="text-2xl font-bold text-green-400">0</div>
                     </div>
                     
-                    <!-- Visualização da Pilha -->
+                    <!-- Visualização da Pilha 
                     <div class="col-span-3 mt-2">
                         <div class="flex justify-between text-[10px] text-gray-500 mb-1">
                             <span>Velho (FIFO)</span>
                             <span>Novo (LIFO)</span>
                         </div>
                         <div class="w-full bg-gray-900 rounded h-4 flex items-center px-1 overflow-hidden" id="buffer-visualizer">
-                            <!-- Barrinhas serão injetadas aqui via JS -->
                         </div>
-                    </div>
+                    </div>-->
                 </div>
 
                 <!-- Controles -->
@@ -177,7 +176,6 @@
                 document.getElementById('processed-count').innerText = processedCount;
 
                 if (frameMeta) {
-                    // Usa o 'time' original exato que foi enviado
                     updateChartData(frameMeta.time, data.pixels);
                     const now = performance.now();
                     latencyDisplay.innerText = Math.round(now - frameMeta.sentAt) + "ms";
@@ -212,7 +210,7 @@
         const statusText = document.getElementById('status-text');
         const bufferCountEl = document.getElementById('buffer-count');
         const modeDisplay = document.getElementById('mode-display');
-        const bufferVisualizer = document.getElementById('buffer-visualizer');
+        //const bufferVisualizer = document.getElementById('buffer-visualizer');
         
         let isCapturing = false;
         let isDraining = false;
@@ -240,7 +238,7 @@
                 label: 'Pixels', 
                 data: [], 
                 borderColor: '#8b5cf6', 
-                backgroundColor: 'rgba(139, 92, 246, 0.6)', // Um pouco mais opaco para barras
+                backgroundColor: 'rgba(139, 92, 246, 0.6)',
                 pointRadius: 4,
                 pointHoverRadius: 6,
                 showLine: false 
@@ -256,16 +254,15 @@
         });
 
         function resetChart(duration) {
-            fileChartDataMap.clear(); // Limpa mapa ao iniciar novo arquivo
+            fileChartDataMap.clear(); 
             
-            // CORREÇÃO: Força tipo 'bar' para TODOS os modos (Webcam e Arquivo)
             sizeChart.data.datasets[0].type = 'bar';
-            sizeChart.data.datasets[0].barThickness = 4; // Um pouco mais grosso para visibilidade
+            sizeChart.data.datasets[0].barThickness = 4; 
             
             // Ajuste inicial para Webcam
             if (activeSourceType !== 'file') {
                sizeChart.options.scales.x.min = 0;
-               sizeChart.options.scales.x.max = 10; // Começa com janela pequena
+               sizeChart.options.scales.x.max = 10; 
             } else {
                sizeChart.options.scales.x.min = 0;
                sizeChart.options.scales.x.max = duration || 60;
@@ -279,12 +276,10 @@
         function updateChartWindow() {
             if (activeSourceType === 'file') {
                 const currentTime = video.currentTime;
-                // Centraliza a janela no tempo atual do vídeo (Agulha)
-                // Mostra 5s antes e 5s depois, total 10s
+ 
                 let min = currentTime - 5;
                 let max = currentTime + 5;
                 
-                // Ajuste para não mostrar valores negativos
                 if (min < 0) {
                     min = 0;
                     max = 10;
@@ -292,28 +287,23 @@
                 
                 sizeChart.options.scales.x.min = min;
                 sizeChart.options.scales.x.max = max;
-                sizeChart.update('none'); // Update sem animação para alta performance
+                sizeChart.update('none'); 
             }
         }
 
         function updateChartData(time, val) {
             if (activeSourceType === 'file') {
-                // USA O TIMESTAMP EXATO COMO CHAVE ÚNICA (Frame ID)
                 const timeKey = time.toFixed(3);
                 
                 fileChartDataMap.set(timeKey, { x: time, y: val });
                 
-                // Reconstrói o dataset a partir do Map
                 const sortedData = Array.from(fileChartDataMap.values()).sort((a, b) => a.x - b.x);
                 sizeChart.data.datasets[0].data = sortedData;
                 
-                // Não atualiza a janela aqui, isso é responsabilidade do updateChartWindow
             } else {
-                // Webcam: Apenas adiciona
                 sizeChart.data.datasets[0].data.push({ x: time, y: val });
                 
-                // CORREÇÃO: Janela Deslizante para Webcam
-                // Mostra os últimos 10 segundos baseados no tempo do último ponto
+
                 let min = time - 5;
                 let max = time + 5;
                 if (min < 0) { min = 0; max = 10; }
@@ -368,7 +358,7 @@
                     updateStatus("CONCLUÍDO", "green");
                     modeDisplay.innerText = "Concluído";
                     modeIndicator.className = "absolute top-0 left-0 w-1 h-full bg-green-500";
-                    resetStreamState(false); // Libera botão, mantém dados
+                    resetStreamState(false);
                     return; 
                 }
 
@@ -381,7 +371,7 @@
                 if (!isCapturing && frameBuffer.length > 0 && !isDraining) {
                     isDraining = true;
                     updateStatus("PREENCHENDO GAPS...", "yellow", true);
-                    modeDisplay.innerText = "Backfill (FIFO)";
+                    modeDisplay.innerText = "Backfill";
                     modeDisplay.className = "text-lg font-bold text-yellow-400 mt-1";
                     modeIndicator.className = "absolute top-0 left-0 w-1 h-full bg-yellow-500";
                     videoWrapper.className = "w-full shadow-2xl rounded-xl overflow-hidden border-2 border-yellow-500 relative bg-black group";
@@ -391,7 +381,7 @@
                     let item;
                     if (isCapturing) {
                         item = frameBuffer.pop(); // LIFO
-                        modeDisplay.innerText = "Live Priority (LIFO)";
+                        modeDisplay.innerText = "Live Priority";
                         modeDisplay.className = "text-lg font-bold text-purple-400 mt-1";
                     } else {
                         item = frameBuffer.shift(); // FIFO
@@ -420,21 +410,18 @@
                 const color = isNew ? 'bg-purple-500' : 'bg-yellow-500';
                 html += `<div class="h-3 w-1 ${color} mx-[1px] rounded-full"></div>`;
             }
-            bufferVisualizer.innerHTML = html;
+           // bufferVisualizer.innerHTML = html;
         }
 
         // --- Controles de Estado ---
         function toggleStream() {
             if (isCapturing || isDraining) {
-                // PARAR CAPTURA (PAUSA)
-                // Não reseta dados no Resume.
+
                 isCapturing = false;
                 if (activeSourceType === 'file') video.pause();
                 
-                // CORREÇÃO CRÍTICA: Se o buffer já estiver vazio ao parar, reseta imediatamente
                 if (frameBuffer.length === 0) {
                     resetStreamState(false);
-                    // Atualiza status visualmente para não parecer quebrado
                     updateStatus("PAUSADO", "gray");
                     modeDisplay.innerText = "Pausado";
                     modeIndicator.className = "absolute top-0 left-0 w-1 h-full bg-gray-500";
@@ -444,10 +431,8 @@
                 btnStream.innerHTML = '<i class="fas fa-hourglass-half"></i> Finalizando...';
                 btnStream.classList.add('cursor-not-allowed', 'opacity-75');
             } else {
-                // INICIAR (RESUME ou START)
                 if (!ws || ws.readyState !== WebSocket.OPEN) return alert("Sem Backend");
                 
-                // NOTA: Dados só são limpos em troca de arquivo/webcam, não aqui.
                 
                 if (activeSourceType === 'file') {
                     video.play().catch(()=>{});
@@ -585,10 +570,10 @@
             }
         };
         
-        // Sincronização do Botão Play/Pause com Eventos do Vídeo (FIXED)
+        // Sincronização do Botão Play/Pause com Eventos do Vídeo
         video.onplay = () => {
             btnPlayPause.innerHTML = '<i class="fas fa-pause"></i>';
-            if (isCapturing) startCaptureLoop(); // Garante loop se der play externo
+            if (isCapturing) startCaptureLoop();
         };
         video.onpause = () => {
             btnPlayPause.innerHTML = '<i class="fas fa-play"></i>';
